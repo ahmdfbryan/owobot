@@ -33,6 +33,26 @@ module.exports = {
 
   dailyResetTimezone: 'America/Los_Angeles',
 
+  // Zona waktu komunitas: dipakai untuk statistik "hari ini/minggu ini" dan jam senyap
+  localTimezone: 'Asia/Jakarta',
+  localTzLabel: 'WIB',
+
+  // Penyelamat streak: peringatan N jam sebelum daily reset kalau belum klaim
+  streakGuardHoursBefore: 2,
+
+  // Pilihan jam senyap (jam lokal). start > end berarti melewati tengah malam.
+  quietOptions: [
+    { value: 'off', label: 'Mati', emoji: '🔔' },
+    { value: '22-6', label: '22.00 – 06.00', emoji: '🌙', start: 22, end: 6 },
+    { value: '23-7', label: '23.00 – 07.00', emoji: '🌙', start: 23, end: 7 },
+    { value: '0-8', label: '00.00 – 08.00', emoji: '😴', start: 0, end: 8 },
+    { value: '7-15', label: '07.00 – 15.00 (jam sekolah/kerja)', emoji: '📚', start: 7, end: 15 },
+  ],
+
+  // Perintah yang dihitung untuk statistik & leaderboard
+  statCommands: ['hunt', 'battle', 'pray', 'curse', 'daily'],
+  leaderboardSize: 10,
+
   // Pengingat di channel dihapus otomatis setelah N detik (0 = tidak dihapus)
   deleteChannelReminderAfter: 60,
 
