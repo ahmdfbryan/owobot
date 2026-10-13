@@ -1,5 +1,6 @@
 const config = require('./config');
 const store = require('./store');
+const ui = require('./ui');
 
 const timers = new Map(); // key `${userId}:${cmd}` -> Timeout
 let client = null;
@@ -65,15 +66,13 @@ async function fire(rem) {
   const user = store.getUser(rem.userId);
   if (!user || !user.enabled || !user.commands.includes(rem.cmd)) return;
 
-  const label = config.commands[rem.cmd].label;
-  const text = rem.cmd === 'vote'
-    ? `⏰ <@${rem.userId}>, kamu sudah bisa **${label}** lagi! Setelah vote, ketik \`/oworeminder sudahvote\`.`
-    : `⏰ <@${rem.userId}>, cooldown **${label}** sudah selesai!`;
+  const payload = ui.reminderMessage(rem);
+  store.setUser(rem.userId, { ...user, sent: (user.sent || 0) + 1 });
 
   if (user.dm) {
     try {
       const u = await client.users.fetch(rem.userId);
-      await u.send(text);
+      await u.send(payload);
       return;
     } catch {
       // DM tertutup -> lanjut kirim ke channel
@@ -83,7 +82,7 @@ async function fire(rem) {
   try {
     const channel = await client.channels.fetch(rem.channelId);
     if (!channel?.isTextBased()) return;
-    const msg = await channel.send({ content: text, allowedMentions: { users: [rem.userId] } });
+    const msg = await channel.send(payload);
     if (config.deleteChannelReminderAfter > 0) {
       setTimeout(() => msg.delete().catch(() => {}), config.deleteChannelReminderAfter * 1000);
     }
