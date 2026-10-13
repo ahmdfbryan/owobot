@@ -7,19 +7,25 @@ module.exports = {
     .filter(Boolean),
 
   commands: {
-    hunt:   { label: 'owo hunt',   aliases: ['hunt', 'h', 'catch'],  cooldown: 15 },
-    battle: { label: 'owo battle', aliases: ['battle', 'b', 'fight'], cooldown: 15 },
-    pray:   { label: 'owo pray',   aliases: ['pray'],  cooldown: 300 },
-    curse:  { label: 'owo curse',  aliases: ['curse'], cooldown: 300 },
+    hunt:   { label: 'owo hunt',   emoji: '🏹', aliases: ['hunt', 'h', 'catch'],  cooldown: 15 },
+    battle: { label: 'owo battle', emoji: '⚔️', aliases: ['battle', 'b', 'fight'], cooldown: 15 },
+    pray:   { label: 'owo pray',   emoji: '🙏', aliases: ['pray'],  cooldown: 300 },
+    curse:  { label: 'owo curse',  emoji: '👻', aliases: ['curse'], cooldown: 300 },
     // 'daily-reset' = diingatkan saat daily OwO reset (tengah malam waktu Pasifik)
-    daily:  { label: 'owo daily',  aliases: ['daily'], cooldown: 'daily-reset' },
+    daily:  { label: 'owo daily',  emoji: '🎁', aliases: ['daily'], cooldown: 'daily-reset' },
     // Vote di top.gg tidak bisa dideteksi dari chat, jadi dimulai lewat /oworeminder sudahvote
-    vote:   { label: 'vote OwO di top.gg', aliases: [], cooldown: 12 * 3600 },
+    vote:   { label: 'vote OwO di top.gg', emoji: '🗳️', aliases: [], cooldown: 12 * 3600 },
   },
 
   // Perintah yang aktif default saat user baru /oworeminder on.
   // hunt & battle dimatikan default karena cooldown 15 detik bisa spam.
   defaultEnabled: ['pray', 'curse', 'daily', 'vote'],
+
+  // Tampilan panel
+  brandColor: 0x5865f2,
+  panelTitle: 'OwO Reminder',
+  // Halaman vote OwO di top.gg (ID bot OwO). Ganti kalau link-nya berubah.
+  voteUrl: 'https://top.gg/bot/408785106942164992/vote',
 
   dailyResetTimezone: 'America/Los_Angeles',
 
