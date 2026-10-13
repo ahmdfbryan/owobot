@@ -27,6 +27,10 @@ module.exports = {
   // Halaman vote OwO di top.gg (ID bot OwO). Ganti kalau link-nya berubah.
   voteUrl: 'https://top.gg/bot/408785106942164992/vote',
 
+  // Panel sticky: panel dikirim ulang ke paling bawah setelah channel sepi selama N ms.
+  // Jeda ini mencegah panel dihapus-kirim terus saat chat ramai (dan kena rate limit).
+  stickyDelayMs: 4000,
+
   dailyResetTimezone: 'America/Los_Angeles',
 
   // Pengingat di channel dihapus otomatis setelah N detik (0 = tidak dihapus)
