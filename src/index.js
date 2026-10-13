@@ -5,6 +5,8 @@ const store = require('./store');
 const scheduler = require('./scheduler');
 const ui = require('./ui');
 const sticky = require('./sticky');
+const stats = require('./stats');
+const guard = require('./guard');
 
 if (!process.env.DISCORD_TOKEN) {
   console.error('DISCORD_TOKEN belum diisi di .env');
@@ -41,6 +43,7 @@ client.once(Events.ClientReady, (c) => {
   console.log(`✅ Login sebagai ${c.user.tag} | prefix OwO: ${config.prefixes.join(', ')}`);
   scheduler.restore();
   sticky.restore().catch((e) => console.warn('[sticky] restore gagal:', e.message));
+  guard.start();
 });
 
 client.on(Events.MessageCreate, (message) => {
@@ -51,15 +54,31 @@ client.on(Events.MessageCreate, (message) => {
   if (!user || !user.enabled) return; // hanya user yang opt-in
 
   const cmd = detectOwoCommand(message.content);
-  if (!cmd || !user.commands.includes(cmd)) return;
+  if (!cmd) return;
 
+  // Catat statistik & streak (semua perintah yang dikenali, walau pengingatnya dimatikan)
+  const tracked = stats.track(message.author.id, cmd, message.channelId);
+  if (cmd === 'daily' && tracked?.streakChanged) {
+    message.react('🔥').catch(() => {});
+    const milestone = ui.streakMilestoneMessage(message.author.id, tracked.streak);
+    if (milestone) {
+      message.channel.send(milestone)
+        .then((m) => setTimeout(() => m.delete().catch(() => {}), 30000))
+        .catch(() => {});
+    }
+  }
+
+  if (!user.commands.includes(cmd)) return;
   scheduler.schedule(message.author.id, cmd, message.channelId);
   message.react('⏱️').catch(() => {});
 });
 
 // ───────────── Aksi pengaturan (dipakai tombol & slash command) ─────────────
 function defaultSettings() {
-  return { enabled: true, dm: false, commands: [...config.defaultEnabled], sent: 0 };
+  return {
+    enabled: true, dm: false, commands: [...config.defaultEnabled], sent: 0,
+    quiet: 'off', streakGuard: true,
+  };
 }
 
 function updateUser(userId, patch) {
@@ -139,6 +158,30 @@ async function handleComponent(interaction) {
       return respond(interaction, ui.settingsView(userId, user, `💾 Tersimpan. ${interaction.values.length} perintah aktif.`));
     }
 
+    case 'quiet': {
+      if (!user) return respond(interaction, ui.notRegisteredView());
+      const value = interaction.values[0] || 'off';
+      user = updateUser(userId, { quiet: value });
+      const opt = config.quietOptions.find((o) => o.value === value);
+      return respond(interaction, ui.settingsView(userId, user, value === 'off'
+        ? '🔔 Mode senyap dimatikan.'
+        : `🌙 Mode senyap aktif ${opt.label} ${config.localTzLabel}. Pengingat ditahan dan dikirim setelahnya.`));
+    }
+
+    case 'guard':
+      if (!user) return respond(interaction, ui.notRegisteredView());
+      user = updateUser(userId, { streakGuard: user.streakGuard === false });
+      return respond(interaction, ui.settingsView(userId, user, user.streakGuard
+        ? `🔥 Penyelamat streak aktif. Kamu diingatkan ${config.streakGuardHoursBefore} jam sebelum reset kalau belum daily.`
+        : '⚫ Penyelamat streak dimatikan.'));
+
+    case 'profile':
+      if (!user) return respond(interaction, ui.notRegisteredView());
+      return respond(interaction, ui.profileView(userId, interaction.member ?? interaction.user));
+
+    case 'lb':
+      return respond(interaction, ui.leaderboardView(args[0] || 'week', userId));
+
     case 'status':
     case 'refresh':
       if (!user) return respond(interaction, ui.notRegisteredView());
@@ -207,9 +250,12 @@ async function handleSlash(interaction) {
     user = turnOn(userId);
     return interaction.reply(ephemeral(ui.settingsView(userId, user, '✅ Pengingat **aktif**!')));
   }
+  if (sub === 'leaderboard') return interaction.reply(ephemeral(ui.leaderboardView('week', userId)));
   if (!user) return interaction.reply(ephemeral(ui.notRegisteredView()));
 
   switch (sub) {
+    case 'profil':
+      return interaction.reply(ephemeral(ui.profileView(userId, interaction.member ?? interaction.user)));
     case 'menu':
       return interaction.reply(ephemeral(ui.settingsView(userId, user)));
     case 'off':
