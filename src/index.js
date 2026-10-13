@@ -4,6 +4,7 @@ const config = require('./config');
 const store = require('./store');
 const scheduler = require('./scheduler');
 const ui = require('./ui');
+const sticky = require('./sticky');
 
 if (!process.env.DISCORD_TOKEN) {
   console.error('DISCORD_TOKEN belum diisi di .env');
@@ -39,10 +40,13 @@ function detectOwoCommand(content) {
 client.once(Events.ClientReady, (c) => {
   console.log(`✅ Login sebagai ${c.user.tag} | prefix OwO: ${config.prefixes.join(', ')}`);
   scheduler.restore();
+  sticky.restore().catch((e) => console.warn('[sticky] restore gagal:', e.message));
 });
 
 client.on(Events.MessageCreate, (message) => {
-  if (message.author.bot || !message.guild) return;
+  if (!message.guild) return;
+  sticky.onMessage(message); // semua pesan (termasuk bot lain seperti OwO) mendorong panel ke bawah
+  if (message.author.bot) return;
   const user = store.getUser(message.author.id);
   if (!user || !user.enabled) return; // hanya user yang opt-in
 
@@ -177,8 +181,17 @@ async function handleSlash(interaction) {
 
   if (interaction.commandName === 'owopanel') {
     try {
-      await interaction.channel.send(ui.publicPanel());
-      return interaction.reply(ephemeral({ content: '✅ Panel OwO Reminder terpasang di channel ini.' }));
+      if (interaction.options.getSubcommand() === 'hapus') {
+        const removed = await sticky.uninstall(interaction.channel);
+        return interaction.reply(ephemeral({
+          content: removed ? '🗑️ Panel sticky dihapus dari channel ini.' : 'Tidak ada panel sticky di channel ini.',
+        }));
+      }
+      await sticky.install(interaction.channel);
+      return interaction.reply(ephemeral({
+        content: '📌 Panel sticky terpasang. Panel akan selalu pindah ke paling bawah setiap ada chat baru.\n' +
+          'Pastikan bot punya izin **Manage Messages** supaya panel lama bisa dihapus.',
+      }));
     } catch {
       return interaction.reply(ephemeral({
         content: '❌ Gagal memasang panel. Pastikan bot punya izin **View Channel**, **Send Messages**, dan **Embed Links** di channel ini.',
@@ -246,6 +259,7 @@ process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', 
 
 store.load();
 scheduler.init(client);
+sticky.init(client);
 client.login(process.env.DISCORD_TOKEN).catch((err) => {
   if (/disallowed intents/i.test(err.message)) {
     console.error('❌ Message Content Intent belum aktif. Buka Developer Portal → Bot → Privileged Gateway Intents → nyalakan Message Content Intent.');
