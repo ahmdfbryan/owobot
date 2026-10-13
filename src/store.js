@@ -6,7 +6,7 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const FILE = path.join(DATA_DIR, 'store.json');
 
-let data = { users: {}, reminders: [] };
+let data = { users: {}, reminders: [], panels: {} };
 let saveTimer = null;
 
 function load() {
@@ -16,6 +16,7 @@ function load() {
       const parsed = JSON.parse(fs.readFileSync(FILE, 'utf8'));
       data.users = parsed.users || {};
       data.reminders = Array.isArray(parsed.reminders) ? parsed.reminders : [];
+      data.panels = parsed.panels || {};
     }
   } catch (err) {
     console.error('[store] Gagal membaca store.json, mulai dari kosong:', err.message);
@@ -73,7 +74,23 @@ function allReminders() {
   return [...data.reminders];
 }
 
+// Panel sticky: channelId -> messageId panel terakhir
+function getPanels() {
+  return { ...data.panels };
+}
+
+function setPanel(channelId, messageId) {
+  data.panels[channelId] = messageId;
+  save();
+}
+
+function removePanel(channelId) {
+  delete data.panels[channelId];
+  save();
+}
+
 module.exports = {
   load, save, saveNow, getUser, setUser,
   upsertReminder, removeReminder, removeAllReminders, getReminders, allReminders,
+  getPanels, setPanel, removePanel,
 };
