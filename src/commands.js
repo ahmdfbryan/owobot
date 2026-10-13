@@ -6,9 +6,11 @@ const cmdChoices = Object.entries(config.commands).map(([value, c]) => ({ name: 
 // Admin: pasang panel tombol di channel
 const owopanel = new SlashCommandBuilder()
   .setName('owopanel')
-  .setDescription('Pasang panel OwO Reminder di channel ini')
+  .setDescription('Kelola panel OwO Reminder')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-  .setDMPermission(false);
+  .setDMPermission(false)
+  .addSubcommand((s) => s.setName('pasang').setDescription('Pasang panel sticky (selalu di paling bawah) di channel ini'))
+  .addSubcommand((s) => s.setName('hapus').setDescription('Hapus panel sticky dari channel ini'));
 
 // Member: pintasan kalau tidak mau lewat panel
 const oworeminder = new SlashCommandBuilder()
