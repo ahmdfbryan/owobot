@@ -45,6 +45,10 @@ function getUser(userId) {
   return data.users[userId] || null;
 }
 
+function allUsers() {
+  return data.users;
+}
+
 function setUser(userId, settings) {
   data.users[userId] = settings;
   save();
@@ -90,7 +94,7 @@ function removePanel(channelId) {
 }
 
 module.exports = {
-  load, save, saveNow, getUser, setUser,
+  load, save, saveNow, getUser, setUser, allUsers,
   upsertReminder, removeReminder, removeAllReminders, getReminders, allReminders,
   getPanels, setPanel, removePanel,
 };
