@@ -1,8 +1,9 @@
 require('dotenv').config();
-const { Client, GatewayIntentBits, EmbedBuilder, MessageFlags, Events } = require('discord.js');
+const { Client, GatewayIntentBits, MessageFlags, Events } = require('discord.js');
 const config = require('./config');
 const store = require('./store');
 const scheduler = require('./scheduler');
+const ui = require('./ui');
 
 if (!process.env.DISCORD_TOKEN) {
   console.error('DISCORD_TOKEN belum diisi di .env');
@@ -17,21 +18,19 @@ const client = new Client({
   ],
 });
 
-// alias -> nama perintah, contoh: 'h' -> 'hunt'
+// ───────────── Deteksi perintah OwO ─────────────
 const aliasMap = new Map();
 for (const [name, c] of Object.entries(config.commands)) {
   for (const a of c.aliases) aliasMap.set(a.toLowerCase(), name);
 }
-// Prefix terpanjang dicek dulu (supaya 'owo' tidak kalah dengan 'o' kalau dipakai bersamaan)
 const prefixes = [...config.prefixes].sort((a, b) => b.length - a.length);
 
-// Kenali perintah OwO dari pesan user. Mendukung "owo hunt", "owoh", "owo h", "wh" (jika prefix w).
+// Mendukung "owo hunt", "owoh", "owo h", "wh" (jika prefix w).
 function detectOwoCommand(content) {
   const text = content.trim().toLowerCase();
   for (const p of prefixes) {
     if (!text.startsWith(p)) continue;
-    const rest = text.slice(p.length).trim();
-    const word = rest.split(/\s+/)[0];
+    const word = text.slice(p.length).trim().split(/\s+/)[0];
     if (word && aliasMap.has(word)) return aliasMap.get(word);
   }
   return null;
@@ -51,98 +50,195 @@ client.on(Events.MessageCreate, (message) => {
   if (!cmd || !user.commands.includes(cmd)) return;
 
   scheduler.schedule(message.author.id, cmd, message.channelId);
-  message.react('⏱️').catch(() => {}); // tanda kecil bahwa timer dimulai (abaikan jika tidak ada izin)
+  message.react('⏱️').catch(() => {});
 });
 
+// ───────────── Aksi pengaturan (dipakai tombol & slash command) ─────────────
 function defaultSettings() {
-  return { enabled: true, dm: false, commands: [...config.defaultEnabled] };
+  return { enabled: true, dm: false, commands: [...config.defaultEnabled], sent: 0 };
 }
 
-function statusEmbed(userId, user) {
-  const lines = Object.entries(config.commands).map(([name, c]) => {
-    const on = user.commands.includes(name);
-    return `${on ? '🟢' : '⚫'} **${c.label}**`;
-  });
-  const active = store.getReminders(userId)
-    .sort((a, b) => a.dueAt - b.dueAt)
-    .map((r) => `• ${config.commands[r.cmd]?.label || r.cmd} — <t:${Math.floor(r.dueAt / 1000)}:R>`);
-
-  return new EmbedBuilder()
-    .setColor(user.enabled ? 0x57f287 : 0x99aab5)
-    .setTitle('⏰ Pengingat OwO')
-    .setDescription(user.enabled ? 'Status: **Aktif**' : 'Status: **Mati**')
-    .addFields(
-      { name: 'Perintah', value: lines.join('\n') },
-      { name: 'Kirim lewat', value: user.dm ? 'DM' : 'Channel tempat kamu mengetik', inline: true },
-      { name: 'Pengingat berjalan', value: active.length ? active.join('\n') : 'Tidak ada' },
-    )
-    .setFooter({ text: 'Bot ini hanya mengingatkan — kamu tetap mengetik perintah OwO sendiri.' });
+function updateUser(userId, patch) {
+  const user = { ...(store.getUser(userId) || defaultSettings()), ...patch };
+  store.setUser(userId, user);
+  return user;
 }
 
-client.on(Events.InteractionCreate, async (interaction) => {
-  if (!interaction.isChatInputCommand() || interaction.commandName !== 'oworeminder') return;
-  const sub = interaction.options.getSubcommand();
+function turnOn(userId) {
+  return updateUser(userId, { enabled: true });
+}
+
+function turnOff(userId) {
+  scheduler.cancelAll(userId);
+  return updateUser(userId, { enabled: false });
+}
+
+function setCommands(userId, cmds) {
+  const before = store.getUser(userId)?.commands || [];
+  for (const c of before) if (!cmds.includes(c)) scheduler.cancel(userId, c);
+  return updateUser(userId, { commands: cmds });
+}
+
+function markVoted(userId, channelId) {
+  const user = store.getUser(userId);
+  if (!user?.enabled) return { ok: false, msg: 'Pengingat kamu sedang mati. Aktifkan dulu ya.' };
+  if (!user.commands.includes('vote')) updateUser(userId, { commands: [...user.commands, 'vote'] });
+  const rem = scheduler.schedule(userId, 'vote', channelId);
+  return { ok: true, msg: `🗳️ Tercatat! Kamu akan diingatkan vote lagi ${ui.ts(rem.dueAt)} (${ui.ts(rem.dueAt, 't')}).` };
+}
+
+// ───────────── Interaksi ─────────────
+const ephemeral = (payload) => ({ ...payload, flags: MessageFlags.Ephemeral });
+
+// Kalau tombol ditekan dari pesan ephemeral (menu pribadi) → edit pesan itu.
+// Kalau dari panel/pengingat publik → balas ephemeral baru.
+async function respond(interaction, payload) {
+  const fromEphemeral = interaction.message?.flags?.has(MessageFlags.Ephemeral);
+  if (fromEphemeral) return interaction.update(payload);
+  return interaction.reply(ephemeral(payload));
+}
+
+async function handleComponent(interaction) {
+  const [, action, ...args] = interaction.customId.split(':');
   const userId = interaction.user.id;
-  const reply = (content) => interaction.reply({ ...content, flags: MessageFlags.Ephemeral });
+  let user = store.getUser(userId);
 
-  try {
-    let user = store.getUser(userId);
+  switch (action) {
+    case 'on':
+      user = turnOn(userId);
+      return respond(interaction, ui.settingsView(userId, user, '✅ Pengingat **aktif**! Atur perintah yang ingin diingatkan di bawah.'));
 
-    if (sub === 'on') {
-      user = user ? { ...user, enabled: true } : defaultSettings();
-      store.setUser(userId, user);
-      return reply({ content: '✅ Pengingat OwO **aktif**. Ketik perintah OwO seperti biasa, nanti saya ingatkan saat cooldown selesai.', embeds: [statusEmbed(userId, user)] });
+    case 'off':
+      if (!user) return respond(interaction, ui.notRegisteredView());
+      user = turnOff(userId);
+      return respond(interaction, ui.settingsView(userId, user, '🔕 Semua pengingat dimatikan dan timer dibatalkan.'));
+
+    case 'toggle':
+      if (!user) return respond(interaction, ui.notRegisteredView());
+      user = user.enabled ? turnOff(userId) : turnOn(userId);
+      return respond(interaction, ui.settingsView(userId, user, user.enabled ? '🟢 Pengingat diaktifkan.' : '🔕 Pengingat dimatikan.'));
+
+    case 'settings':
+      if (!user) return respond(interaction, ui.notRegisteredView());
+      return respond(interaction, ui.settingsView(userId, user));
+
+    case 'dm':
+      if (!user) return respond(interaction, ui.notRegisteredView());
+      user = updateUser(userId, { dm: !user.dm });
+      return respond(interaction, ui.settingsView(userId, user, user.dm
+        ? '📩 Pengingat dikirim lewat DM. Kalau DM kamu tertutup, dikirim di channel.'
+        : '💬 Pengingat dikirim di channel.'));
+
+    case 'cmds': {
+      if (!user) return respond(interaction, ui.notRegisteredView());
+      user = setCommands(userId, interaction.values);
+      return respond(interaction, ui.settingsView(userId, user, `💾 Tersimpan. ${interaction.values.length} perintah aktif.`));
     }
 
-    if (!user) {
-      return reply({ content: 'Kamu belum mengaktifkan pengingat. Pakai `/oworeminder on` dulu ya.' });
-    }
+    case 'status':
+    case 'refresh':
+      if (!user) return respond(interaction, ui.notRegisteredView());
+      return respond(interaction, ui.statusView(userId, user));
 
-    if (sub === 'off') {
-      store.setUser(userId, { ...user, enabled: false });
+    case 'cancelall':
+      if (!user) return respond(interaction, ui.notRegisteredView());
       scheduler.cancelAll(userId);
-      return reply({ content: '🔕 Semua pengingat OwO kamu dimatikan.' });
+      return respond(interaction, ui.statusView(userId, user, '🗑️ Semua timer dibatalkan.'));
+
+    case 'voted': {
+      const owner = args[0];
+      if (owner && owner !== userId) {
+        return interaction.reply(ephemeral({ content: 'Tombol ini milik orang lain. Pakai tombol **Sudah Vote** di panel ya.' }));
+      }
+      if (!user) return respond(interaction, ui.notRegisteredView());
+      const res = markVoted(userId, interaction.channelId);
+      return interaction.reply(ephemeral({ content: res.msg }));
     }
 
-    if (sub === 'status') {
-      return reply({ embeds: [statusEmbed(userId, user)] });
+    case 'mute': {
+      const [cmd, owner] = args;
+      if (owner !== userId) {
+        return interaction.reply(ephemeral({ content: 'Tombol ini milik orang lain.' }));
+      }
+      if (!user || !config.commands[cmd]) return respond(interaction, ui.notRegisteredView());
+      setCommands(userId, user.commands.filter((c) => c !== cmd));
+      return interaction.reply(ephemeral({
+        content: `🔕 Pengingat **${config.commands[cmd].label}** dimatikan. Bisa dinyalakan lagi lewat **Pengaturan**.`,
+      }));
     }
 
-    if (sub === 'atur') {
+    default:
+      return null;
+  }
+}
+
+async function handleSlash(interaction) {
+  const userId = interaction.user.id;
+
+  if (interaction.commandName === 'owopanel') {
+    try {
+      await interaction.channel.send(ui.publicPanel());
+      return interaction.reply(ephemeral({ content: '✅ Panel OwO Reminder terpasang di channel ini.' }));
+    } catch {
+      return interaction.reply(ephemeral({
+        content: '❌ Gagal memasang panel. Pastikan bot punya izin **View Channel**, **Send Messages**, dan **Embed Links** di channel ini.',
+      }));
+    }
+  }
+
+  if (interaction.commandName !== 'oworeminder') return null;
+  const sub = interaction.options.getSubcommand();
+  let user = store.getUser(userId);
+
+  if (sub === 'on') {
+    user = turnOn(userId);
+    return interaction.reply(ephemeral(ui.settingsView(userId, user, '✅ Pengingat **aktif**!')));
+  }
+  if (!user) return interaction.reply(ephemeral(ui.notRegisteredView()));
+
+  switch (sub) {
+    case 'menu':
+      return interaction.reply(ephemeral(ui.settingsView(userId, user)));
+    case 'off':
+      user = turnOff(userId);
+      return interaction.reply(ephemeral(ui.settingsView(userId, user, '🔕 Semua pengingat dimatikan.')));
+    case 'status':
+      return interaction.reply(ephemeral(ui.statusView(userId, user)));
+    case 'atur': {
       const cmd = interaction.options.getString('perintah', true);
       const aktif = interaction.options.getBoolean('aktif', true);
       const set = new Set(user.commands);
       aktif ? set.add(cmd) : set.delete(cmd);
-      user = { ...user, commands: [...set] };
-      store.setUser(userId, user);
-      if (!aktif) scheduler.cancel(userId, cmd);
-      return reply({ content: `${aktif ? '🟢' : '⚫'} Pengingat **${config.commands[cmd].label}** ${aktif ? 'dinyalakan' : 'dimatikan'}.` });
+      user = setCommands(userId, [...set]);
+      return interaction.reply(ephemeral(ui.settingsView(userId, user,
+        `${aktif ? '🟢' : '⚫'} **${config.commands[cmd].label}** ${aktif ? 'dinyalakan' : 'dimatikan'}.`)));
     }
+    case 'dm':
+      user = updateUser(userId, { dm: interaction.options.getBoolean('aktif', true) });
+      return interaction.reply(ephemeral(ui.settingsView(userId, user)));
+    case 'sudahvote':
+      return interaction.reply(ephemeral({ content: markVoted(userId, interaction.channelId).msg }));
+    default:
+      return null;
+  }
+}
 
-    if (sub === 'dm') {
-      const aktif = interaction.options.getBoolean('aktif', true);
-      store.setUser(userId, { ...user, dm: aktif });
-      return reply({ content: aktif ? '📩 Pengingat akan dikirim lewat DM (kalau DM tertutup, dikirim di channel).' : '💬 Pengingat akan dikirim di channel.' });
-    }
-
-    if (sub === 'sudahvote') {
-      if (!user.enabled) return reply({ content: 'Pengingat kamu sedang mati. Pakai `/oworeminder on` dulu.' });
-      if (!user.commands.includes('vote')) {
-        user = { ...user, commands: [...user.commands, 'vote'] };
-        store.setUser(userId, user);
-      }
-      const rem = scheduler.schedule(userId, 'vote', interaction.channelId);
-      return reply({ content: `🗳️ Dicatat! Saya ingatkan untuk vote lagi <t:${Math.floor(rem.dueAt / 1000)}:R>.` });
+client.on(Events.InteractionCreate, async (interaction) => {
+  try {
+    if (interaction.isChatInputCommand()) return await handleSlash(interaction);
+    if ((interaction.isButton() || interaction.isStringSelectMenu()) && interaction.customId.startsWith('owo:')) {
+      return await handleComponent(interaction);
     }
   } catch (err) {
     console.error('[interaction]', err);
-    if (!interaction.replied && !interaction.deferred) {
-      reply({ content: '❌ Terjadi kesalahan, coba lagi.' }).catch(() => {});
+    if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) {
+      interaction.reply(ephemeral({ content: '❌ Terjadi kesalahan, coba lagi.' })).catch(() => {});
     }
   }
+  return null;
 });
 
-// Simpan data sebelum proses berhenti (pm2 restart/stop)
+// ───────────── Start ─────────────
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, () => { store.saveNow(); process.exit(0); });
 }
@@ -150,4 +246,11 @@ process.on('unhandledRejection', (err) => console.error('[unhandledRejection]', 
 
 store.load();
 scheduler.init(client);
-client.login(process.env.DISCORD_TOKEN);
+client.login(process.env.DISCORD_TOKEN).catch((err) => {
+  if (/disallowed intents/i.test(err.message)) {
+    console.error('❌ Message Content Intent belum aktif. Buka Developer Portal → Bot → Privileged Gateway Intents → nyalakan Message Content Intent.');
+  } else {
+    console.error('❌ Gagal login:', err.message);
+  }
+  process.exit(1);
+});
